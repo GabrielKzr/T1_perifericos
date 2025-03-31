@@ -1,6 +1,3 @@
-#ifndef ADC_CONFIG_C  // Evitar múltiplas inclusões
-#define ADC_CONFIG_C
-
 #include <stm32f4xx_conf.h>
 #include <hal.h>
 
@@ -50,5 +47,3 @@ uint16_t adc_read()
 	/* Get the conversion value */
 	return ADC_GetConversionValue(ADC1);
 }
-
-#endif
