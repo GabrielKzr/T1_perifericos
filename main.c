@@ -28,11 +28,6 @@ const int LUX_MIN = 10;
 const int LUX_MAX = 100;
 const int DUTY_MAX = 1000;
 
-struct debug_message_t {
-	char type;
-	float f;
-};
-
 float luminosity()
 {
 	float voltage, lux = 0.0, rldr;
@@ -87,6 +82,29 @@ void set_pwm_temp(float temperature)
     TIM4->CCR3 = duty_cycle;
 }
 
+/*
+void set_pwm_temp(float temperature)
+{
+    int duty_cycle;
+    static float smoothed_temp = 0;
+	
+    // Suavização
+    smoothed_temp = 0.9 * smoothed_temp + 0.1 * temperature;
+	
+    if (smoothed_temp <= 20.0) {
+        duty_cycle = 0;
+    } else if (smoothed_temp >= 30.0) {
+        duty_cycle = DUTY_MAX;
+    } else {
+        // Mapeia 20–30°C para 0–DUTY_MAX
+        duty_cycle = ((smoothed_temp - 20.0) / 10.0) * DUTY_MAX;
+    }
+	
+    TIM4->CCR3 = duty_cycle;
+}
+*/
+
+
 /* application tasks */
 void led_config(void)
 {
@@ -114,27 +132,15 @@ void *t5(void *arg);
 void *t1(void *arg)
 {
 	float* f = (float *)malloc(sizeof(float));
-	char fval[30];
 	
-	struct message_s msg1;
-	struct message_s msg2;
-	struct message_s *pmsg;
-	struct debug_message_t* msg = (struct debug_message_t*)malloc(sizeof(struct debug_message_t));
+	static struct message_s msg;
 
 	adc_channel(ADC_Channel_8);
 	*f = temperature();	
-	ftoa(*f, fval, 6);
 
-	pmsg = &msg1;
-	pmsg->data = f;
-	task_mq_enqueue(t4, pmsg);
-
-	msg->type = 't';
-	msg->f = *f;
-
-	pmsg = &msg2;
-	pmsg->data = msg;
-	task_mq_enqueue(t5, pmsg);
+	msg.type = 1;
+	msg.data = f;
+	task_mq_enqueue(t5, &msg);
 
 	return 0;
 }
@@ -142,27 +148,16 @@ void *t1(void *arg)
 void *t2(void *arg)
 {
 	float* f = (float *)malloc(sizeof(float));
-	char fval[30];
-
-	struct message_s msg1;
-	struct message_s msg2;
-	struct message_s *pmsg;
-	struct debug_message_t* msg = (struct debug_message_t*)malloc(sizeof(struct debug_message_t));
+	
+	static struct message_s msg;
 	
 	adc_channel(ADC_Channel_9);
 	*f = luminosity();	
-	ftoa(*f, fval, 6);
 	
-	pmsg = &msg1;
-	pmsg->data = f;
-	task_mq_enqueue(t3, pmsg);
+	msg.type = 2;
+	msg.data = f;
 
-	msg->type = 'l';
-	msg->f = *f;
-
-	pmsg = &msg2;
-	pmsg->data = msg;
-	task_mq_enqueue(t5, pmsg);
+	task_mq_enqueue(t5, &msg);
 
 	return 0;
 }
@@ -204,27 +199,32 @@ void *t4(void *arg)
 }
 
 void *t5(void *arg) {
+
 	struct message_s *msg;
-	struct debug_message_t* debug;
 	char fval[30];
 
 	while (task_mq_items() > 0)
 	{
 		msg = task_mq_dequeue();
 
-		debug = (struct debug_message_t*)(msg->data);
+		ftoa(*((float*)msg->data), fval, 6);
 
-		ftoa(debug->f, fval, 6);
+		if(msg->type == 1) {
 
-		if(debug->type == 'l') {
-			printf("lux  > %s\n", fval);
-		} else if(debug->type == 't') {
 			printf("temp > %s\n", fval);
+			
+			task_mq_enqueue(t4, msg);
+			
+		} else if(msg->type == 2) {
+
+			printf("lux  > %s\n", fval);
+
+			task_mq_enqueue(t3, msg);
+
 		} else {
 			printf("tipo não disponível\n");
 		}
 
-		free(msg->data);
 	}
 
 	return 0;
@@ -246,11 +246,14 @@ int main(void)
 
 	/* setup CoOS and tasks */
 	task_pinit(ptasks);
-	task_add(ptasks, t1, 50);
-	task_add(ptasks, t2, 50);
-	task_add(ptasks, t3, 50);
-	task_add(ptasks, t4, 50);
-	task_add(ptasks, t5, 50);
+	task_add(ptasks, t1, 130);
+	task_add(ptasks, t2, 130);
+
+	// use of static memory in t1 and t2, so should be executed with less or equal priority
+
+	task_add(ptasks, t3, 60);
+	task_add(ptasks, t4, 60);
+	task_add(ptasks, t5, 20);
 
 	while (1) {
 		task_schedule(ptasks);
@@ -258,9 +261,10 @@ int main(void)
 		/* toggle board LED to show progress and wait for 1000ms */
 		/* there is no need for LED toggle or delay in a real application */
 		GPIO_ToggleBits(GPIOC, GPIO_Pin_13);
-		delay_ms(10);
+		// delay_ms(10);
 	}
 	
 	/* never reached */
 	return 0;
 }
+
